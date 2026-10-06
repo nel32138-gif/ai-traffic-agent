@@ -1,5 +1,6 @@
-import os
 import json
+import re
+
 from dotenv import load_dotenv
 
 from search import telegram_search
@@ -9,37 +10,30 @@ load_dotenv()
 
 
 def parse_request(request):
-    """
-    Определяет количество клиентов, услугу
-    и ключевые слова для поиска.
-    """
-
     text = request.lower()
 
-    # Количество
     number = 10
 
-    import re
-
-    match = re.search(
-        r"\b(\d+)\b",
-        text
-    )
+    match = re.search(r"\b(\d+)\b", text)
 
     if match:
         number = int(match.group(1))
 
-    # Определяем услугу
-    if "баннер" in text:
+    if "баннер" in text or "banner" in text:
         service = "баннеры"
+
     elif "дизайн" in text:
         service = "дизайн"
+
     elif "сайт" in text or "лендинг" in text:
         service = "создание сайтов"
+
     elif "видео" in text or "монтаж" in text:
         service = "монтаж видео"
+
     elif "логотип" in text:
         service = "логотипы"
+
     else:
         service = text
 
@@ -50,7 +44,7 @@ def parse_request(request):
     }
 
 
-async def run_agent(request: str):
+async def run_agent(request):
 
     parsed = parse_request(request)
 
@@ -58,7 +52,7 @@ async def run_agent(request: str):
 
     print()
     print("================================")
-    print("        AI TRAFFIC AGENT")
+    print("       AI TRAFFIC AGENT")
     print("================================")
     print()
 
@@ -76,82 +70,129 @@ async def run_agent(request: str):
 
     print()
 
-    # Поиск
+    # -------------------------
+    # SEARCH
+    # -------------------------
+
     print(
-        "[1/3] Ищу потенциальных клиентов..."
+        "[1/3] Ищу публичные Telegram-источники..."
     )
 
-    candidates = await telegram_search(
-        request,
-        limit=100
-    )
+    try:
 
-    if not candidates:
-
-        print(
-            "Не удалось найти кандидатов."
+        candidates = await telegram_search(
+            request,
+            limit=100
         )
 
-        return
+    except Exception as error:
+
+        print(
+            f"[SEARCH ERROR] {error}"
+        )
+
+        candidates = []
 
     print(
-        f"[FOUND] Найдено: {len(candidates)}"
+        f"[FOUND] Найдено источников: "
+        f"{len(candidates)}"
     )
 
     print()
 
-    # AI анализ
-    print(
-        "[2/3] Анализирую кандидатов..."
-    )
+    # -------------------------
+    # ANALYSIS
+    # -------------------------
 
-    ranked = await rank_candidates(
-        request,
-        candidates
-    )
+    if candidates:
 
-    # Лучшие результаты
+        print(
+            "[2/3] Анализирую кандидатов..."
+        )
+
+        try:
+
+            ranked = await rank_candidates(
+                request,
+                candidates
+            )
+
+        except Exception as error:
+
+            print(
+                f"[AI ERROR] {error}"
+            )
+
+            ranked = candidates
+
+    else:
+
+        print(
+            "[2/3] Кандидатов для анализа нет."
+        )
+
+        ranked = []
+
+    # -------------------------
+    # RESULTS
+    # -------------------------
+
     ranked = ranked[:wanted]
 
     print()
+
     print(
-        f"[3/3] Лучшие {len(ranked)} кандидатов:"
+        f"[3/3] Результатов: "
+        f"{len(ranked)}"
     )
+
     print()
 
-    for index, candidate in enumerate(
-        ranked,
-        1
-    ):
+    if not ranked:
 
         print(
-            f"{index}. "
-            f"{candidate.get('name', 'Без названия')}"
+            "Пока не удалось найти подходящих "
+            "потенциальных клиентов."
         )
 
-        print(
-            f"   Ссылка: "
-            f"{candidate.get('link', '—')}"
-        )
+    else:
 
-        print(
-            f"   Оценка: "
-            f"{candidate.get('score', 0)}/100"
-        )
+        for index, candidate in enumerate(
+            ranked,
+            1
+        ):
 
-        print(
-            f"   Почему: "
-            f"{candidate.get('reason', '—')}"
-        )
+            print(
+                f"{index}. "
+                f"{candidate.get('name', 'Без названия')}"
+            )
 
-        print(
-            f"   Сигнал: "
-            f"{candidate.get('signal', '—')}"
-        )
+            print(
+                f"   Ссылка: "
+                f"{candidate.get('link', '—')}"
+            )
 
-        print()
+            print(
+                f"   Оценка: "
+                f"{candidate.get('score', 0)}/100"
+            )
 
-    # Сохраняем результаты
+            print(
+                f"   Почему: "
+                f"{candidate.get('reason', '—')}"
+            )
+
+            print(
+                f"   Сигнал: "
+                f"{candidate.get('signal', '—')}"
+            )
+
+            print()
+
+    # -------------------------
+    # ALWAYS CREATE RESULTS
+    # -------------------------
+
     with open(
         "results.json",
         "w",
@@ -166,5 +207,5 @@ async def run_agent(request: str):
         )
 
     print(
-        "Результаты сохранены в results.json"
+        "[DONE] results.json создан."
     )

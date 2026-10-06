@@ -1,0 +1,40 @@
+name: AI Traffic Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: "Что найти?"
+        required: true
+        default: "Найди 10 потенциальных клиентов на баннеры в Telegram"
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download project
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run AI Traffic Agent
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RESULTS: 10
+          SEARCH_LIMIT: 100
+        run: |
+          python main.py "${{ github.event.inputs.request }}"
+
+      - name: Save results
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-results
+          path: results.json

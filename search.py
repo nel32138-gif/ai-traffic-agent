@@ -1,13 +1,14 @@
 import re
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, parse_qs, unquote
 
 
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
-        "AppleWebKit/605.1.15 Safari/605.1"
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        "Version/18.0 Mobile/15E148 Safari/604.1"
     )
 }
 
@@ -15,57 +16,80 @@ HEADERS = {
 def extract_terms(request):
     text = request.lower()
 
-    terms = []
-
     if "баннер" in text or "banner" in text:
-        terms += [
+        return [
             "нужен баннер",
             "нужны баннеры",
             "нужен дизайнер",
             "ищем дизайнера",
+            "ищу дизайнера",
             "заказать баннер",
             "дизайн рекламы",
             "рекламный креатив",
+            "креатив для рекламы",
+            "оформление рекламы",
         ]
 
-    if "дизайн" in text:
-        terms += [
-            "нужен дизайнер",
-            "ищем дизайнера",
-            "заказать дизайн",
-            "дизайн рекламы",
-        ]
-
-    if "сайт" in text:
-        terms += [
+    if "сайт" in text or "лендинг" in text:
+        return [
             "нужен сайт",
+            "нужен лендинг",
+            "ищем веб дизайнера",
             "нужен веб дизайнер",
-            "лендинг",
+            "заказать сайт",
         ]
 
-    if not terms:
-        terms = [
-            x for x in re.findall(
-                r"[A-Za-zА-Яа-яЁё0-9_-]{4,}",
-                text
-            )
-        ][:8]
+    if "видео" in text or "монтаж" in text:
+        return [
+            "нужен монтаж видео",
+            "ищем монтажера",
+            "нужен видеомонтаж",
+            "нужен видеограф",
+        ]
 
-    return list(dict.fromkeys(terms))
+    if "логотип" in text:
+        return [
+            "нужен логотип",
+            "ищем дизайнера логотипа",
+            "заказать логотип",
+        ]
+
+    words = re.findall(
+        r"[A-Za-zА-Яа-яЁё0-9_-]{4,}",
+        text
+    )
+
+    return words[:8]
 
 
-def search_web(query, limit=30):
+def get_real_url(href):
+    if not href:
+        return ""
+
+    if href.startswith("//"):
+        href = "https:" + href
+
+    # DuckDuckGo иногда отдаёт redirect URL.
+    parsed = urlparse(href)
+
+    if "duckduckgo.com" in parsed.netloc:
+        query = parse_qs(parsed.query)
+        if "uddg" in query:
+            return unquote(query["uddg"][0])
+
+    return href
+
+
+def search_duckduckgo(query, limit=30):
     url = (
-        "https://www.google.com/search?q="
+        "https://html.duckduckgo.com/html/?q="
         + quote(query)
-        + "&num="
-        + str(limit)
     )
 
     response = requests.get(
         url,
         headers=HEADERS,
-        timeout=15
+        timeout=20
     )
 
     response.raise_for_status()
@@ -77,49 +101,62 @@ def search_web(query, limit=30):
 
     results = []
 
-    for item in soup.select("div.MjjYud"):
+    for result in soup.select(".result"):
 
-        link_tag = item.select_one("a")
+        link_tag = result.select_one(
+            ".result__a"
+        )
 
         if not link_tag:
             continue
 
-        link = link_tag.get("href", "")
+        href = get_real_url(
+            link_tag.get("href", "")
+        )
 
-        title_tag = item.select_one("h3")
-
-        if not title_tag:
-            continue
-
-        title = title_tag.get_text(
+        title = link_tag.get_text(
             " ",
             strip=True
         )
 
-        text = item.get_text(
-            " ",
-            strip=True
+        snippet_tag = result.select_one(
+            ".result__snippet"
         )
 
-        if "t.me/" not in link:
+        snippet = (
+            snippet_tag.get_text(
+                " ",
+                strip=True
+            )
+            if snippet_tag
+            else ""
+        )
+
+        if "t.me/" not in href:
             continue
 
         results.append({
             "name": title,
-            "link": link,
-            "text": text[:1800]
+            "link": href,
+            "text": snippet
         })
+
+        if len(results) >= limit:
+            break
 
     return results
 
 
-async def telegram_search(request, limit=150):
+async def telegram_search(request, limit=100):
 
     terms = extract_terms(request)
 
     print(
-        "[SEARCH] Ищу публичные Telegram-источники..."
+        "[SEARCH] Ключевые запросы:"
     )
+
+    for term in terms:
+        print(f"  - {term}")
 
     found = {}
 
@@ -128,19 +165,25 @@ async def telegram_search(request, limit=150):
         query = f'site:t.me "{term}"'
 
         print(
-            f"[SEARCH] {term}"
+            f"[SEARCH] Ищу: {query}"
         )
 
         try:
-            results = search_web(
+
+            results = search_duckduckgo(
                 query,
                 limit=30
+            )
+
+            print(
+                f"[SEARCH] Получено результатов: "
+                f"{len(results)}"
             )
 
         except Exception as error:
 
             print(
-                f"[SEARCH] Ошибка: {error}"
+                f"[SEARCH] Ошибка поиска: {error}"
             )
 
             continue
@@ -150,11 +193,18 @@ async def telegram_search(request, limit=150):
             link = result.get(
                 "link",
                 ""
-            )
+            ).strip()
 
             if not link:
                 continue
 
             found[link] = result
 
-    return list(found.values())[:limit]
+    results = list(found.values())
+
+    print(
+        f"[SEARCH] Уникальных Telegram-источников: "
+        f"{len(results)}"
+    )
+
+    return results[:limit]
